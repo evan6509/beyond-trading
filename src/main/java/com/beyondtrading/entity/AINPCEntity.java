@@ -1,6 +1,11 @@
 package com.beyondtrading.entity;
 
+import com.beyondtrading.npc.ai.NPCManager;
+import com.beyondtrading.npc.conversation.ConversationManager;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
@@ -14,6 +19,7 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 
 public class AINPCEntity extends PathfinderMob {
     private BlockPos homePos;
@@ -38,6 +44,27 @@ public class AINPCEntity extends PathfinderMob {
         return Mob.createMobAttributes()
             .add(Attributes.MAX_HEALTH, 20.0)
             .add(Attributes.MOVEMENT_SPEED, 0.5);
+    }
+
+    @Override
+    public InteractionResult interact(Player player, InteractionHand hand, Vec3 hitPos) {
+        if (level().isClientSide()) {
+            return InteractionResult.SUCCESS;
+        }
+
+        if (player.isShiftKeyDown()) {
+            return InteractionResult.PASS;
+        }
+
+        setLastPlayerInteracted(player);
+
+        ServerLevel serverLevel = (ServerLevel) level();
+        NPCManager npcManager = NPCManager.get(serverLevel.getServer());
+        npcManager.initializeNPC(getUUID(), "thomas", this);
+
+        ConversationManager.get().startConversation(player, this);
+
+        return InteractionResult.SUCCESS;
     }
 
     @Override
