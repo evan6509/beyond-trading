@@ -1,5 +1,6 @@
 package com.beyondtrading;
 
+import com.beyondtrading.config.ModConfig;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +11,7 @@ public class BeyondTradingMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        ModConfig.get();
         LOGGER.info("Beyond Trading initialized");
     }
 }
