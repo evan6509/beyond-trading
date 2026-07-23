@@ -25,32 +25,83 @@ public class LLMInterface {
             .build();
     }
 
-    public Optional<LLMResponse> chat(List<Map<String, String>> messages) {
-        var config = ModConfig.get().llm;
+    private record Endpoint(String baseUrl, String apiKey) {}
 
+    private Endpoint resolve() {
         String baseUrl = ModelListFetcher.getWorkingBaseUrl();
         String apiKey = ModelListFetcher.getWorkingApiKey();
         if (baseUrl == null) {
+            var config = ModConfig.get().llm;
             baseUrl = config.baseUrl();
             apiKey = config.apiKey();
         }
+        return new Endpoint(baseUrl, apiKey);
+    }
 
+    public Optional<String> ask(List<Map<String, String>> messages) {
+        var ep = resolve();
+        try {
+            JsonObject body = buildBody(ep, messages, false);
+            JsonObject root = send(ep.baseUrl, body);
+            if (root == null) return Optional.empty();
+
+            String content = root.getAsJsonArray("choices")
+                .get(0).getAsJsonObject()
+                .getAsJsonObject("message")
+                .get("content").getAsString();
+            return Optional.of(content);
+        } catch (Exception e) {
+            BeyondTradingMod.LOGGER.error("LLM request failed", e);
+            return Optional.empty();
+        }
+    }
+
+    public Optional<LLMResponse> chatStructured(List<Map<String, String>> messages) {
+        var ep = resolve();
+        try {
+            JsonObject body = buildBody(ep, messages, true);
+            JsonObject root = send(ep.baseUrl, body);
+            if (root == null) return Optional.empty();
+
+            String raw = root.getAsJsonArray("choices")
+                .get(0).getAsJsonObject()
+                .getAsJsonObject("message")
+                .get("content").getAsString();
+
+            return Optional.of(parseStructured(raw));
+        } catch (Exception e) {
+            BeyondTradingMod.LOGGER.error("LLM request failed", e);
+            return Optional.empty();
+        }
+    }
+
+    private JsonObject buildBody(Endpoint ep, List<Map<String, String>> messages, boolean structured) {
+        var config = ModConfig.get().llm;
+        JsonObject body = new JsonObject();
+        body.addProperty("model", config.model());
+        body.add("messages", GSON.toJsonTree(messages));
+        body.addProperty("temperature", 0.7);
+        body.addProperty("max_tokens", 2048);
+        body.addProperty("stream", false);
+        if (structured) {
+            JsonObject fmt = new JsonObject();
+            fmt.addProperty("type", "json_object");
+            body.add("response_format", fmt);
+        }
+        return body;
+    }
+
+    private JsonObject send(String baseUrl, JsonObject body) {
         try {
             String url = baseUrl.replaceAll("/+$", "") + "/chat/completions";
             URI uri = URI.create(url);
 
-            JsonObject body = new JsonObject();
-            body.addProperty("model", config.model());
-            body.add("messages", GSON.toJsonTree(messages));
-            body.addProperty("temperature", 0.7);
-            body.addProperty("max_tokens", 2048);
-            body.addProperty("stream", false);
-
+            var ep = resolve();
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .timeout(Duration.ofMillis(config.timeoutMs()))
+                .header("Authorization", "Bearer " + ep.apiKey)
+                .timeout(Duration.ofMillis(ModConfig.get().llm.timeoutMs()))
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body)))
                 .build();
 
@@ -59,20 +110,25 @@ public class LLMInterface {
 
             if (response.statusCode() != 200) {
                 BeyondTradingMod.LOGGER.warn("LLM returned {} from {}", response.statusCode(), url);
-                return Optional.empty();
+                return null;
             }
-
-            JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
-            String content = root
-                .getAsJsonArray("choices")
-                .get(0).getAsJsonObject()
-                .getAsJsonObject("message")
-                .get("content").getAsString();
-
-            return Optional.of(new LLMResponse(content));
+            return JsonParser.parseString(response.body()).getAsJsonObject();
         } catch (Exception e) {
             BeyondTradingMod.LOGGER.error("LLM request to {} failed", baseUrl, e);
-            return Optional.empty();
+            return null;
+        }
+    }
+
+    private LLMResponse parseStructured(String json) {
+        try {
+            JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
+            String action = obj.has("action") && !obj.get("action").isJsonNull()
+                ? obj.get("action").getAsString() : null;
+            String dialogue = obj.has("dialogue") && !obj.get("dialogue").isJsonNull()
+                ? obj.get("dialogue").getAsString() : "Hello!";
+            return new LLMResponse(action, dialogue);
+        } catch (Exception e) {
+            return new LLMResponse(null, json);
         }
     }
 }

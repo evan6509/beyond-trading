@@ -1,11 +1,13 @@
 package com.beyondtrading.entity;
 
 import com.beyondtrading.npc.ConversationManager;
+import com.beyondtrading.npc.data.NPCData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -19,8 +21,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 public class AINPCEntity extends PathfinderMob {
-    private String npcName = "Thomas";
+    private NPCData npcData;
     private BlockPos homePos;
+    private LivingEntity followTarget;
+    private Player lastPlayerInteracted;
 
     public AINPCEntity(EntityType<? extends PathfinderMob> entityType, Level level) {
         super(entityType, level);
@@ -48,12 +52,26 @@ public class AINPCEntity extends PathfinderMob {
         return InteractionResult.SUCCESS;
     }
 
-    public void setNpcName(String name) {
-        this.npcName = name;
+    @Override
+    public void aiStep() {
+        super.aiStep();
+        if (followTarget != null && followTarget.isAlive()) {
+            if (distanceToSqr(followTarget) > 3.0) {
+                getNavigation().moveTo(followTarget, 0.6);
+            }
+        }
+    }
+
+    public void setNpcData(NPCData data) {
+        this.npcData = data;
+    }
+
+    public NPCData getNpcData() {
+        return npcData;
     }
 
     public String getNpcName() {
-        return npcName;
+        return npcData != null ? npcData.name() : "Villager";
     }
 
     public void setHomePos(BlockPos pos) {
@@ -62,5 +80,22 @@ public class AINPCEntity extends PathfinderMob {
 
     public BlockPos getHomePos() {
         return homePos;
+    }
+
+    public void setFollowTarget(LivingEntity target) {
+        this.followTarget = target;
+    }
+
+    public void clearFollowTarget() {
+        this.followTarget = null;
+        getNavigation().stop();
+    }
+
+    public void setLastPlayerInteracted(Player player) {
+        this.lastPlayerInteracted = player;
+    }
+
+    public Player getLastPlayerInteracted() {
+        return lastPlayerInteracted;
     }
 }

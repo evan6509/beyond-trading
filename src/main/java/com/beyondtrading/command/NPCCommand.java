@@ -7,6 +7,8 @@ import com.beyondtrading.entity.ModEntities;
 import com.beyondtrading.llm.LLMInterface;
 import com.beyondtrading.llm.ModelListFetcher;
 import com.beyondtrading.llm.WorldContext;
+import com.beyondtrading.npc.data.NPCData;
+import com.google.gson.Gson;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
@@ -20,6 +22,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +33,7 @@ import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
 public class NPCCommand {
+    private static final Gson GSON = new Gson();
     private static final LLMInterface llm = new LLMInterface();
     private static final SuggestionProvider<CommandSourceStack> MODEL_SUGGESTIONS =
         (ctx, builder) -> {
@@ -51,15 +57,14 @@ public class NPCCommand {
                         : "";
 
                     CompletableFuture.runAsync(() -> {
-                        var messages = List.of(
+                        llm.ask(List.of(
                             Map.of("role", "system", "content",
                                 WorldContext.getSystemPrompt() + context),
                             Map.of("role", "user", "content", message)
-                        );
-                        llm.chat(messages).ifPresentOrElse(
+                        )).ifPresentOrElse(
                             response -> source.getServer().execute(() ->
                                 source.sendSuccess(() ->
-                                    Component.literal("§e[LLM] " + response.content()), false)),
+                                    Component.literal("§e[LLM] " + response), false)),
                             () -> source.getServer().execute(() ->
                                 source.sendFailure(Component.literal("§cLLM request failed")))
                         );
@@ -122,13 +127,27 @@ public class NPCCommand {
                     .executes(ctx -> {
                         ServerLevel level = ctx.getSource().getLevel();
                         Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
-                        return summonNPC(level, pos);
-                    }))
+                        return summonNPC(level, pos, "thomas");
+                    })
+                    .then(argument("name", StringArgumentType.word())
+                        .executes(ctx -> {
+                            ServerLevel level = ctx.getSource().getLevel();
+                            Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
+                            String name = StringArgumentType.getString(ctx, "name");
+                            return summonNPC(level, pos, name);
+                        })))
                 .executes(ctx -> {
                     ServerLevel level = ctx.getSource().getLevel();
                     Vec3 pos = ctx.getSource().getPosition();
-                    return summonNPC(level, pos);
-                }))
+                    return summonNPC(level, pos, "thomas");
+                })
+                .then(argument("name", StringArgumentType.word())
+                    .executes(ctx -> {
+                        ServerLevel level = ctx.getSource().getLevel();
+                        Vec3 pos = ctx.getSource().getPosition();
+                        String name = StringArgumentType.getString(ctx, "name");
+                        return summonNPC(level, pos, name);
+                    })))
             .then(literal("inspect")
                 .then(argument("target", EntityArgument.entity())
                     .executes(ctx -> {
@@ -138,12 +157,20 @@ public class NPCCommand {
         );
     }
 
-    private static int summonNPC(ServerLevel level, Vec3 pos) {
+    private static int summonNPC(ServerLevel level, Vec3 pos, String name) {
+        NPCData data = loadNPCData(name);
+        if (data == null) {
+            level.getServer().sendSystemMessage(Component.literal(
+                "§cUnknown NPC type: " + name + ". Available: thomas"));
+            return 0;
+        }
+
         AINPCEntity npc = new AINPCEntity(ModEntities.AI_NPC, level);
         npc.setPos(pos.x, pos.y, pos.z);
         npc.setHomePos(BlockPos.containing(pos));
+        npc.setNpcData(data);
         level.addFreshEntity(npc);
-        BeyondTradingMod.LOGGER.info("Summoned NPC Thomas at {}", pos);
+        BeyondTradingMod.LOGGER.info("Summoned NPC {} at {}", data.name(), pos);
         return 1;
     }
 
@@ -152,10 +179,31 @@ public class NPCCommand {
             source.sendFailure(Component.literal("§cTarget is not an AI NPC."));
             return 0;
         }
+        NPCData data = npc.getNpcData();
+        if (data == null) {
+            source.sendFailure(Component.literal("§cNPC has no data loaded."));
+            return 0;
+        }
+
         source.sendSuccess(() -> Component.literal(
-            "§6=== " + npc.getNpcName() + " ===§r\n"
+            "§6=== " + data.name() + " ===§r\n"
+            + "§ePersonality: §7" + String.join(", ", data.personality()) + "§r\n"
+            + "§eRole: §7" + data.role() + "§r\n"
             + "§eHome: §7" + (npc.getHomePos() != null ? npc.getHomePos().toShortString() : "none")),
             false);
         return 1;
+    }
+
+    private static NPCData loadNPCData(String name) {
+        String path = "data/beyondtrading/npcs/" + name.toLowerCase() + ".json";
+        try (InputStream is = NPCCommand.class.getClassLoader().getResourceAsStream(path)) {
+            if (is == null) return null;
+            String json = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            NPCData data = GSON.fromJson(json, NPCData.class);
+            if (data == null || data.name() == null) return null;
+            return data;
+        } catch (IOException e) {
+            return null;
+        }
     }
 }

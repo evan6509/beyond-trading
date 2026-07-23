@@ -5,7 +5,14 @@ import com.beyondtrading.entity.AINPCEntity;
 import com.beyondtrading.llm.LLMInterface;
 import com.beyondtrading.llm.LLMResponse;
 import com.beyondtrading.llm.WorldContext;
+import com.beyondtrading.npc.behavior.NPCBehaviorController;
+import com.beyondtrading.npc.data.NPCData;
+import com.beyondtrading.npc.data.NPCMemory;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -17,9 +24,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ConversationManager {
+    private static final Gson GSON = new Gson();
     private static ConversationManager instance;
     private final ConcurrentHashMap<UUID, NPCSession> sessions = new ConcurrentHashMap<>();
     private final LLMInterface llm = new LLMInterface();
+    private final NPCBehaviorController behavior = new NPCBehaviorController();
 
     private static final long TIMEOUT_MS = 120_000;
     private static final double MAX_DISTANCE = 15.0;
@@ -38,7 +47,12 @@ public class ConversationManager {
             player.sendSystemMessage(Component.literal(
                 "§7[You ended conversation with " + old.getNpc().getNpcName() + "]"));
         }
-        sessions.put(pid, new NPCSession(npc, player));
+
+        MinecraftServer server = ((ServerLevel) player.level()).getServer();
+        NPCMemory memory = new NPCMemory(npc.getNpcName(),
+            server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT));
+
+        sessions.put(pid, new NPCSession(npc, player, memory));
         player.sendSystemMessage(Component.literal(
             "§e[You are now talking to " + npc.getNpcName() + " — type in chat]"));
         greet(player, npc);
@@ -51,9 +65,8 @@ public class ConversationManager {
         var server = level.getServer();
 
         CompletableFuture.runAsync(() -> {
-            var messages = buildMessages(session, "Hello!", true);
-            llm.chat(messages).ifPresent(response ->
-                server.execute(() -> reply(player, npc, response)));
+            llm.chatStructured(buildMessages(session, "Hello!", true)).ifPresent(
+                response -> server.execute(() -> handleResponse(session, response)));
         });
     }
 
@@ -65,17 +78,8 @@ public class ConversationManager {
         }
     }
 
-    public Optional<NPCSession> getSession(ServerPlayer player) {
-        return Optional.ofNullable(sessions.get(player.getUUID()));
-    }
-
     public boolean isEngaged(ServerPlayer player) {
         return sessions.containsKey(player.getUUID());
-    }
-
-    public boolean isEngagedWith(ServerPlayer player, AINPCEntity npc) {
-        NPCSession s = sessions.get(player.getUUID());
-        return s != null && s.getNpc().getUUID().equals(npc.getUUID());
     }
 
     public boolean handleChat(ServerPlayer player, String message) {
@@ -95,12 +99,8 @@ public class ConversationManager {
         player.sendSystemMessage(Component.literal("§7[You to " + npc.getNpcName() + "] " + message));
 
         CompletableFuture.runAsync(() -> {
-            var messages = buildMessages(session, message, false);
-            llm.chat(messages).ifPresentOrElse(
-                response -> server.execute(() -> {
-                    reply(player, npc, response);
-                    session.addTurn(message, response.content());
-                }),
+            llm.chatStructured(buildMessages(session, message, false)).ifPresentOrElse(
+                response -> server.execute(() -> handleResponse(session, response)),
                 () -> server.execute(() ->
                     player.sendSystemMessage(Component.literal(
                         "§c[" + npc.getNpcName() + " seems confused...]"))));
@@ -109,9 +109,19 @@ public class ConversationManager {
         return true;
     }
 
-    private void reply(ServerPlayer player, AINPCEntity npc, LLMResponse response) {
+    private void handleResponse(NPCSession session, LLMResponse response) {
+        ServerPlayer player = session.getPlayer();
+        AINPCEntity npc = session.getNpc();
+
         player.sendSystemMessage(Component.literal(
-            "§e[" + npc.getNpcName() + "] " + response.content()));
+            "§e[" + npc.getNpcName() + "] " + response.dialogue()));
+        session.addTurn(null, response.dialogue());
+
+        behavior.execute(npc, response.action());
+
+        if (response.hasAction()) {
+            BeyondTradingMod.LOGGER.info("{} executes action: {}", npc.getNpcName(), response.action());
+        }
     }
 
     public void tick() {
@@ -121,19 +131,16 @@ public class ConversationManager {
             ServerPlayer player = session.getPlayer();
 
             if (!npc.isAlive()) return true;
-
             if (now - session.getLastActivity() > TIMEOUT_MS) {
                 player.sendSystemMessage(Component.literal(
                     "§7[" + npc.getNpcName() + " wandered off]"));
                 return true;
             }
-
             if (player.distanceToSqr(npc) > MAX_DISTANCE * MAX_DISTANCE) {
                 player.sendSystemMessage(Component.literal(
                     "§7[" + npc.getNpcName() + " lost interest as you walked away]"));
                 return true;
             }
-
             return false;
         });
     }
@@ -142,15 +149,19 @@ public class ConversationManager {
                                                      String message, boolean isGreeting) {
         AINPCEntity npc = session.getNpc();
         ServerPlayer player = session.getPlayer();
-        String context = isGreeting
-            ? "You just met this player."
-            : WorldContext.build(player);
+        NPCData data = npc.getNpcData();
+
+        String context = isGreeting ? "You just met this player." : WorldContext.build(player);
+        String personality = data != null ? String.join(", ", data.personality()) : "friendly";
+        String role = data != null ? data.role() : "a villager";
 
         String systemPrompt = "You are " + npc.getNpcName()
-            + ", a Minecraft villager. You live in the world, have your own daily life, "
-            + "and speak conversationally in 1-3 sentences. "
-            + "You are helpful but have your own personality and priorities.\n\n"
+            + ", a " + personality + " Minecraft villager.\n"
+            + "Your role: " + role + "\n\n"
+            + "Available actions: GO_HOME (walk to your home), FOLLOW_PLAYER (walk with the player), STAND_STILL (stay put)\n"
+            + "Respond with JSON only: {\"action\": \"...\", \"dialogue\": \"...\"}\n\n"
             + "Current situation:\n" + context
+            + session.getMemory().formatForPrompt()
             + session.formatHistory();
 
         return List.of(
