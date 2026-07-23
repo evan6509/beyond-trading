@@ -1,7 +1,7 @@
-package com.beyondtrading.npc.ai;
+package com.beyondtrading.llm;
 
 import com.beyondtrading.BeyondTradingMod;
-import com.beyondtrading.config.LLMConfig;
+import com.beyondtrading.config.ModConfig;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -13,20 +13,20 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public class LLMInterface {
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
-    private final LLMConfig config;
 
-    public LLMInterface(LLMConfig config) {
-        this.config = config;
+    public LLMInterface() {
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
     }
 
-    public LLMResponse chat(List<Map<String, String>> messages) {
+    public Optional<LLMResponse> chat(List<Map<String, String>> messages) {
+        var config = ModConfig.get().llm;
         try {
             String baseUrl = config.baseUrl().replaceAll("/+$", "");
             URI uri = URI.create(baseUrl + "/chat/completions");
@@ -35,63 +35,37 @@ public class LLMInterface {
             body.addProperty("model", config.model());
             body.add("messages", GSON.toJsonTree(messages));
             body.addProperty("temperature", 0.7);
-            body.addProperty("max_tokens", 256);
+            body.addProperty("max_tokens", 512);
             body.addProperty("stream", false);
-
-            JsonObject responseFormat = new JsonObject();
-            responseFormat.addProperty("type", "json_object");
-            body.add("response_format", responseFormat);
-
-            String jsonBody = GSON.toJson(body);
 
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + config.apiKey())
                 .timeout(Duration.ofMillis(config.timeoutMs()))
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body)))
                 .build();
 
             HttpResponse<String> response = httpClient.send(request,
                 HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                BeyondTradingMod.LOGGER.warn("LLM API returned {}: {}",
+                BeyondTradingMod.LOGGER.warn("LLM returned {}: {}",
                     response.statusCode(), response.body());
-                return fallbackResponse();
+                return Optional.empty();
             }
 
-            return parseResponse(response.body());
-        } catch (Exception e) {
-            BeyondTradingMod.LOGGER.error("LLM request failed", e);
-            return fallbackResponse();
-        }
-    }
-
-    private LLMResponse parseResponse(String json) {
-        try {
-            JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+            JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
             String content = root
                 .getAsJsonArray("choices")
                 .get(0).getAsJsonObject()
                 .getAsJsonObject("message")
                 .get("content").getAsString();
 
-            JsonObject result = JsonParser.parseString(content).getAsJsonObject();
-            String action = result.get("action").getAsString();
-            String dialogue = result.get("dialogue").getAsString();
-            String memoryUpdate = result.has("memory_update")
-                && !result.get("memory_update").isJsonNull()
-                ? result.get("memory_update").getAsString() : null;
-
-            return new LLMResponse(action, dialogue, memoryUpdate);
+            return Optional.of(new LLMResponse(content));
         } catch (Exception e) {
-            BeyondTradingMod.LOGGER.error("Failed to parse LLM response: {}", json, e);
-            return fallbackResponse();
+            BeyondTradingMod.LOGGER.error("LLM request failed", e);
+            return Optional.empty();
         }
-    }
-
-    private LLMResponse fallbackResponse() {
-        return new LLMResponse("STAND_STILL", "...", null);
     }
 }
