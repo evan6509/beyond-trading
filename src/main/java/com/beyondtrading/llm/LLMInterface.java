@@ -27,9 +27,17 @@ public class LLMInterface {
 
     public Optional<LLMResponse> chat(List<Map<String, String>> messages) {
         var config = ModConfig.get().llm;
+
+        String baseUrl = ModelListFetcher.getWorkingBaseUrl();
+        String apiKey = ModelListFetcher.getWorkingApiKey();
+        if (baseUrl == null) {
+            baseUrl = config.baseUrl();
+            apiKey = config.apiKey();
+        }
+
         try {
-            String baseUrl = config.baseUrl().replaceAll("/+$", "");
-            URI uri = URI.create(baseUrl + "/chat/completions");
+            String url = baseUrl.replaceAll("/+$", "") + "/chat/completions";
+            URI uri = URI.create(url);
 
             JsonObject body = new JsonObject();
             body.addProperty("model", config.model());
@@ -41,7 +49,7 @@ public class LLMInterface {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(uri)
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.apiKey())
+                .header("Authorization", "Bearer " + apiKey)
                 .timeout(Duration.ofMillis(config.timeoutMs()))
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body)))
                 .build();
@@ -50,8 +58,7 @@ public class LLMInterface {
                 HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                BeyondTradingMod.LOGGER.warn("LLM returned {}: {}",
-                    response.statusCode(), response.body());
+                BeyondTradingMod.LOGGER.warn("LLM returned {} from {}", response.statusCode(), url);
                 return Optional.empty();
             }
 
@@ -64,7 +71,7 @@ public class LLMInterface {
 
             return Optional.of(new LLMResponse(content));
         } catch (Exception e) {
-            BeyondTradingMod.LOGGER.error("LLM request failed", e);
+            BeyondTradingMod.LOGGER.error("LLM request to {} failed", baseUrl, e);
             return Optional.empty();
         }
     }
