@@ -43,7 +43,7 @@ public class LLMInterface {
             body.addProperty("model", config.model());
             body.add("messages", GSON.toJsonTree(messages));
             body.addProperty("temperature", 0.7);
-            body.addProperty("max_tokens", 512);
+            body.addProperty("max_tokens", 2048);
             body.addProperty("stream", false);
 
             HttpRequest request = HttpRequest.newBuilder()
