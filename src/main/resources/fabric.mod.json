@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "beyondtrading",
-  "version": "0.1.0",
+  "version": "${version}",
   "name": "Beyond Trading",
   "description": "NPCs with personalities, memories, and local LLM-powered conversations.",
   "authors": [],

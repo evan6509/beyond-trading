@@ -3,9 +3,26 @@ plugins {
     id "net.fabricmc.fabric-loom" version "1.17.14"
 }
 
+version = mod_version
+
 base {
     archivesName = "beyond-trading"
 }
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+tasks.register("copyToServer", Copy) {
+    dependsOn jar
+    from jar.archiveFile
+    into serverModsDir
+}
+
+build.finalizedBy copyToServer
 
 repositories {
     mavenCentral()
