@@ -49,12 +49,16 @@ public class ConversationManager {
         }
 
         MinecraftServer server = ((ServerLevel) player.level()).getServer();
-        NPCMemory memory = new NPCMemory(npc.getNpcName(),
+        NPCMemory memory = new NPCMemory(npc.getUUID().toString(),
             server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT));
 
         sessions.put(pid, new NPCSession(npc, player, memory));
         player.sendSystemMessage(Component.literal(
             "§e[You are now talking to " + npc.getNpcName() + " — type in chat]"));
+
+        int day = (int) (server.overworld().getOverworldClockTime() / 24000);
+        memory.remember(day, "Met " + player.getScoreboardName(), 80);
+
         greet(player, npc);
     }
 
@@ -112,6 +116,7 @@ public class ConversationManager {
     private void handleResponse(NPCSession session, LLMResponse response) {
         ServerPlayer player = session.getPlayer();
         AINPCEntity npc = session.getNpc();
+        MinecraftServer server = ((ServerLevel) player.level()).getServer();
 
         player.sendSystemMessage(Component.literal(
             "§e[" + npc.getNpcName() + "] " + response.dialogue()));
@@ -119,8 +124,18 @@ public class ConversationManager {
 
         behavior.execute(npc, response.action());
 
+        String action = response.action();
         if (response.hasAction()) {
-            BeyondTradingMod.LOGGER.info("{} executes action: {}", npc.getNpcName(), response.action());
+            int day = (int) (server.overworld().getOverworldClockTime() / 24000);
+            String summary = switch (action.toUpperCase()) {
+                case "GO_HOME" -> "Went home";
+                case "FOLLOW_PLAYER" -> "Started following " + player.getScoreboardName();
+                default -> null;
+            };
+            if (summary != null) {
+                session.getMemory().remember(day, summary, 60);
+                BeyondTradingMod.LOGGER.info("{} {} (day {})", npc.getNpcName(), summary.toLowerCase(), day);
+            }
         }
     }
 
