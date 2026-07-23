@@ -1,6 +1,8 @@
 package com.beyondtrading.entity;
 
+import com.beyondtrading.npc.ConversationManager;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
@@ -40,13 +42,10 @@ public class AINPCEntity extends PathfinderMob {
 
     @Override
     public InteractionResult interact(Player player, InteractionHand hand, Vec3 hitPos) {
-        if (level().isClientSide()) {
-            return InteractionResult.SUCCESS;
-        }
-        if (hand != InteractionHand.MAIN_HAND) {
-            return InteractionResult.PASS;
-        }
-        return InteractionResult.PASS;
+        if (hand != InteractionHand.MAIN_HAND) return InteractionResult.PASS;
+        if (level().isClientSide()) return InteractionResult.SUCCESS;
+        ConversationManager.get().engage((ServerPlayer) player, this);
+        return InteractionResult.SUCCESS;
     }
 
     public void setNpcName(String name) {

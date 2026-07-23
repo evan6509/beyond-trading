@@ -45,11 +45,13 @@ public class ConversationManager {
     }
 
     private void greet(ServerPlayer player, AINPCEntity npc) {
+        NPCSession session = sessions.get(player.getUUID());
+        if (session == null) return;
         ServerLevel level = (ServerLevel) player.level();
         var server = level.getServer();
 
         CompletableFuture.runAsync(() -> {
-            var messages = buildMessages(npc, player, "Hello!", true);
+            var messages = buildMessages(session, "Hello!", true);
             llm.chat(messages).ifPresent(response ->
                 server.execute(() -> reply(player, npc, response)));
         });
@@ -93,7 +95,7 @@ public class ConversationManager {
         player.sendSystemMessage(Component.literal("§7[You to " + npc.getNpcName() + "] " + message));
 
         CompletableFuture.runAsync(() -> {
-            var messages = buildMessages(npc, player, message, false);
+            var messages = buildMessages(session, message, false);
             llm.chat(messages).ifPresentOrElse(
                 response -> server.execute(() -> {
                     reply(player, npc, response);
@@ -136,8 +138,10 @@ public class ConversationManager {
         });
     }
 
-    private List<Map<String, String>> buildMessages(AINPCEntity npc, ServerPlayer player,
+    private List<Map<String, String>> buildMessages(NPCSession session,
                                                      String message, boolean isGreeting) {
+        AINPCEntity npc = session.getNpc();
+        ServerPlayer player = session.getPlayer();
         String context = isGreeting
             ? "You just met this player."
             : WorldContext.build(player);
@@ -146,7 +150,8 @@ public class ConversationManager {
             + ", a Minecraft villager. You live in the world, have your own daily life, "
             + "and speak conversationally in 1-3 sentences. "
             + "You are helpful but have your own personality and priorities.\n\n"
-            + "Current situation:\n" + context;
+            + "Current situation:\n" + context
+            + session.formatHistory();
 
         return List.of(
             Map.of("role", "system", "content", systemPrompt),

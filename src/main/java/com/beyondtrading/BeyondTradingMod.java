@@ -29,7 +29,6 @@ public class BeyondTradingMod implements ModInitializer {
             NPCCommand.register(dispatcher));
 
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register(this::onAllowChat);
-        ServerMessageEvents.CHAT_MESSAGE.register(this::onChatMessage);
 
         ServerTickEvents.START_SERVER_TICK.register(server ->
             ConversationManager.get().tick());
@@ -38,10 +37,10 @@ public class BeyondTradingMod implements ModInitializer {
     }
 
     private boolean onAllowChat(PlayerChatMessage message, ServerPlayer player, ChatType.Bound bound) {
-        return !ConversationManager.get().isEngaged(player);
-    }
-
-    private void onChatMessage(PlayerChatMessage message, ServerPlayer player, ChatType.Bound bound) {
-        ConversationManager.get().handleChat(player, message.signedContent());
+        if (ConversationManager.get().isEngaged(player)) {
+            ConversationManager.get().handleChat(player, message.signedContent());
+            return false;
+        }
+        return true;
     }
 }
