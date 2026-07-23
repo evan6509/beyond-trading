@@ -3,11 +3,13 @@ package com.beyondtrading.command;
 import com.beyondtrading.config.ModConfig;
 import com.beyondtrading.llm.LLMInterface;
 import com.beyondtrading.llm.ModelListFetcher;
+import com.beyondtrading.llm.WorldContext;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
 import java.util.Map;
@@ -34,9 +36,15 @@ public class NPCCommand {
                     var source = ctx.getSource();
                     source.sendSuccess(() -> Component.literal("§7[You] " + message), false);
 
+                    ServerPlayer player = source.getPlayer();
+                    String context = player != null
+                        ? "\n\n" + WorldContext.build(player)
+                        : "";
+
                     CompletableFuture.runAsync(() -> {
                         var messages = List.of(
-                            Map.of("role", "system", "content", "You are a helpful assistant. Reply concisely."),
+                            Map.of("role", "system", "content",
+                                WorldContext.getSystemPrompt() + context),
                             Map.of("role", "user", "content", message)
                         );
                         llm.chat(messages).ifPresentOrElse(
