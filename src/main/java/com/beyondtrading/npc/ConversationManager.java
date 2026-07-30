@@ -7,10 +7,8 @@ import com.beyondtrading.llm.LLMResponse;
 import com.beyondtrading.llm.WorldContext;
 import com.beyondtrading.npc.behavior.NPCBehaviorController;
 import com.beyondtrading.npc.data.NPCData;
-import com.beyondtrading.npc.data.NPCMemory;
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.beyondtrading.npc.data.Profession;
+import com.beyondtrading.npc.data.Relationship;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -18,15 +16,14 @@ import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ConversationManager {
-    private static final Gson GSON = new Gson();
     private static ConversationManager instance;
-    private final ConcurrentHashMap<UUID, NPCSession> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<SessionKey, NPCSession> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, UUID> activeNPCChat = new ConcurrentHashMap<>();
     private final LLMInterface llm = new LLMInterface();
     private final NPCBehaviorController behavior = new NPCBehaviorController();
 
@@ -40,31 +37,41 @@ public class ConversationManager {
         return instance;
     }
 
+    public record SessionKey(UUID playerId, UUID npcId) {}
+
     public void engage(ServerPlayer player, AINPCEntity npc) {
         UUID pid = player.getUUID();
-        NPCSession old = sessions.get(pid);
-        if (old != null) {
-            player.sendSystemMessage(Component.literal(
-                "§7[You ended conversation with " + old.getNpc().getNpcName() + "]"));
+        UUID nid = npc.getUUID();
+        SessionKey key = new SessionKey(pid, nid);
+
+        activeNPCChat.put(pid, nid);
+
+        if (sessions.containsKey(key)) {
+            greet(player, npc);
+            return;
         }
 
         MinecraftServer server = ((ServerLevel) player.level()).getServer();
-        NPCMemory memory = new NPCMemory(npc.getUUID().toString(),
-            server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT));
+        NPCSession session = new NPCSession(npc, player);
+        sessions.put(key, session);
 
-        sessions.put(pid, new NPCSession(npc, player, memory));
         player.sendSystemMessage(Component.literal(
             "§e[You are now talking to " + npc.getNpcName() + " — type in chat]"));
 
         int day = (int) (server.overworld().getOverworldClockTime() / 24000);
-        memory.remember(day, "Met " + player.getScoreboardName(), 80);
+        npc.remember(day, "Met " + player.getScoreboardName(), 80);
+        npc.saveToDisk();
 
         greet(player, npc);
     }
 
     private void greet(ServerPlayer player, AINPCEntity npc) {
-        NPCSession session = sessions.get(player.getUUID());
+        UUID pid = player.getUUID();
+        UUID nid = npc.getUUID();
+        SessionKey key = new SessionKey(pid, nid);
+        NPCSession session = sessions.get(key);
         if (session == null) return;
+
         ServerLevel level = (ServerLevel) player.level();
         var server = level.getServer();
 
@@ -75,7 +82,11 @@ public class ConversationManager {
     }
 
     public void disengage(ServerPlayer player) {
-        NPCSession session = sessions.remove(player.getUUID());
+        UUID pid = player.getUUID();
+        UUID nid = activeNPCChat.remove(pid);
+        if (nid == null) return;
+        SessionKey key = new SessionKey(pid, nid);
+        NPCSession session = sessions.remove(key);
         if (session != null) {
             player.sendSystemMessage(Component.literal(
                 "§7[" + session.getNpc().getNpcName() + " nods goodbye]"));
@@ -83,16 +94,25 @@ public class ConversationManager {
     }
 
     public boolean isEngaged(ServerPlayer player) {
-        return sessions.containsKey(player.getUUID());
+        return activeNPCChat.containsKey(player.getUUID());
     }
 
     public boolean handleChat(ServerPlayer player, String message) {
-        NPCSession session = sessions.get(player.getUUID());
-        if (session == null) return false;
+        UUID pid = player.getUUID();
+        UUID nid = activeNPCChat.get(pid);
+        if (nid == null) return false;
+
+        SessionKey key = new SessionKey(pid, nid);
+        NPCSession session = sessions.get(key);
+        if (session == null) {
+            activeNPCChat.remove(pid);
+            return false;
+        }
 
         AINPCEntity npc = session.getNpc();
         if (!npc.isAlive() || npc.distanceToSqr(player) > MAX_DISTANCE * MAX_DISTANCE) {
-            disengage(player);
+            sessions.remove(key);
+            activeNPCChat.remove(pid);
             return false;
         }
 
@@ -133,27 +153,35 @@ public class ConversationManager {
                 default -> null;
             };
             if (summary != null) {
-                session.getMemory().remember(day, summary, 60);
+                npc.remember(day, summary, 60);
                 BeyondTradingMod.LOGGER.info("{} {} (day {})", npc.getNpcName(), summary.toLowerCase(), day);
             }
         }
+        npc.saveToDisk();
     }
 
     public void tick() {
         long now = System.currentTimeMillis();
-        sessions.values().removeIf(session -> {
+        sessions.entrySet().removeIf(entry -> {
+            SessionKey key = entry.getKey();
+            NPCSession session = entry.getValue();
             AINPCEntity npc = session.getNpc();
             ServerPlayer player = session.getPlayer();
 
-            if (!npc.isAlive()) return true;
+            if (!npc.isAlive()) {
+                activeNPCChat.remove(key.playerId(), key.npcId());
+                return true;
+            }
             if (now - session.getLastActivity() > TIMEOUT_MS) {
                 player.sendSystemMessage(Component.literal(
                     "§7[" + npc.getNpcName() + " wandered off]"));
+                activeNPCChat.remove(key.playerId(), key.npcId());
                 return true;
             }
             if (player.distanceToSqr(npc) > MAX_DISTANCE * MAX_DISTANCE) {
                 player.sendSystemMessage(Component.literal(
                     "§7[" + npc.getNpcName() + " lost interest as you walked away]"));
+                activeNPCChat.remove(key.playerId(), key.npcId());
                 return true;
             }
             return false;
@@ -165,17 +193,19 @@ public class ConversationManager {
         AINPCEntity npc = session.getNpc();
         ServerPlayer player = session.getPlayer();
         NPCData data = npc.getNpcData();
+        Profession prof = npc.getProfession();
 
-        String context = isGreeting ? "You just met this player." : WorldContext.build(player);
-        String personality = data != null ? String.join(", ", data.personality()) : "friendly";
-        String role = data != null ? data.role() : "a villager";
+        String context = !isGreeting ? WorldContext.build(player) : "You just met this player.";
+        String personality = data != null ? String.join(", ", data.traits()) : "friendly";
+        String professionDesc = prof != Profession.NONE
+            ? "a " + prof.displayName().toLowerCase()
+            : "a villager";
 
         String systemPrompt = "You are " + npc.getNpcName()
-            + ", a " + personality + " Minecraft villager.\n"
-            + "Your role: " + role + "\n\n"
+            + ", a " + personality + " " + professionDesc + ".\n\n"
             + "Available actions: GO_HOME (walk to your home), FOLLOW_PLAYER (walk with the player), STAND_STILL (stay put)\n"
             + "Respond with JSON only: {\"action\": \"...\", \"dialogue\": \"...\"}\n\n"
-            + "Current situation:\n" + context
+            + "Current situation:\n" + context + "\n"
             + session.getMemory().formatForPrompt()
             + session.formatHistory();
 

@@ -14,10 +14,10 @@ public class NPCSession {
     private final List<String[]> history;
     private long lastActivity;
 
-    public NPCSession(AINPCEntity npc, ServerPlayer player, NPCMemory memory) {
+    public NPCSession(AINPCEntity npc, ServerPlayer player) {
         this.npc = npc;
         this.player = player;
-        this.memory = memory;
+        this.memory = npc.getMemory();
         this.history = new ArrayList<>();
         this.lastActivity = System.currentTimeMillis();
     }
@@ -35,7 +35,7 @@ public class NPCSession {
 
     public String formatHistory() {
         if (history.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder("\nRecent conversation:\n");
+        StringBuilder sb = new StringBuilder("\nConversation history:\n");
         for (String[] turn : history) {
             if (turn[0] != null) sb.append("Player: ").append(turn[0]).append("\n");
             sb.append("You: ").append(turn[1]).append("\n");

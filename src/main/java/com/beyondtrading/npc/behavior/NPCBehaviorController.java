@@ -2,7 +2,6 @@ package com.beyondtrading.npc.behavior;
 
 import com.beyondtrading.entity.AINPCEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 
 public class NPCBehaviorController {
@@ -11,6 +10,7 @@ public class NPCBehaviorController {
         if (npc == null || action == null) return;
         switch (action.toUpperCase()) {
             case "GO_HOME" -> goHome(npc);
+            case "GO_TO_WORK" -> goToWork(npc);
             case "FOLLOW_PLAYER" -> followPlayer(npc);
             case "STAND_STILL" -> standStill(npc);
             default -> standStill(npc);
@@ -25,10 +25,18 @@ public class NPCBehaviorController {
         }
     }
 
+    private void goToWork(AINPCEntity npc) {
+        npc.clearFollowTarget();
+        BlockPos work = npc.getWorkplacePos();
+        if (work != null) {
+            npc.getNavigation().moveTo(work.getX(), work.getY(), work.getZ(), 0.6);
+        }
+    }
+
     private void followPlayer(AINPCEntity npc) {
         Player player = npc.getLastPlayerInteracted();
         if (player != null && player.isAlive()) {
-            npc.setFollowTarget(player);
+            npc.getNavigation().moveTo(player, 0.6);
         }
     }
 

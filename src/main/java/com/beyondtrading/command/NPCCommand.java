@@ -8,6 +8,8 @@ import com.beyondtrading.llm.LLMInterface;
 import com.beyondtrading.llm.ModelListFetcher;
 import com.beyondtrading.llm.WorldContext;
 import com.beyondtrading.npc.data.NPCData;
+import com.beyondtrading.npc.data.Profession;
+import com.beyondtrading.npc.data.Relationship;
 import com.google.gson.Gson;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -127,27 +129,43 @@ public class NPCCommand {
                     .executes(ctx -> {
                         ServerLevel level = ctx.getSource().getLevel();
                         Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
-                        return summonNPC(level, pos, "thomas");
+                        return summonNPC(level, pos, "thomas", null);
                     })
                     .then(argument("name", StringArgumentType.word())
                         .executes(ctx -> {
                             ServerLevel level = ctx.getSource().getLevel();
                             Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
                             String name = StringArgumentType.getString(ctx, "name");
-                            return summonNPC(level, pos, name);
-                        })))
+                            return summonNPC(level, pos, name, null);
+                        })
+                        .then(argument("profession", StringArgumentType.word())
+                            .executes(ctx -> {
+                                ServerLevel level = ctx.getSource().getLevel();
+                                Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
+                                String name = StringArgumentType.getString(ctx, "name");
+                                String profession = StringArgumentType.getString(ctx, "profession");
+                                return summonNPC(level, pos, name, profession);
+                            }))))
                 .executes(ctx -> {
                     ServerLevel level = ctx.getSource().getLevel();
                     Vec3 pos = ctx.getSource().getPosition();
-                    return summonNPC(level, pos, "thomas");
+                    return summonNPC(level, pos, "thomas", null);
                 })
                 .then(argument("name", StringArgumentType.word())
                     .executes(ctx -> {
                         ServerLevel level = ctx.getSource().getLevel();
                         Vec3 pos = ctx.getSource().getPosition();
                         String name = StringArgumentType.getString(ctx, "name");
-                        return summonNPC(level, pos, name);
-                    })))
+                        return summonNPC(level, pos, name, null);
+                    })
+                    .then(argument("profession", StringArgumentType.word())
+                        .executes(ctx -> {
+                            ServerLevel level = ctx.getSource().getLevel();
+                            Vec3 pos = ctx.getSource().getPosition();
+                            String name = StringArgumentType.getString(ctx, "name");
+                            String profession = StringArgumentType.getString(ctx, "profession");
+                            return summonNPC(level, pos, name, profession);
+                        }))))
             .then(literal("inspect")
                 .then(argument("target", EntityArgument.entity())
                     .executes(ctx -> {
@@ -157,20 +175,31 @@ public class NPCCommand {
         );
     }
 
-    private static int summonNPC(ServerLevel level, Vec3 pos, String name) {
+    private static int summonNPC(ServerLevel level, Vec3 pos, String name, String professionOverride) {
         NPCData data = loadNPCData(name);
         if (data == null) {
-            level.getServer().sendSystemMessage(Component.literal(
-                "§cUnknown NPC type: " + name + ". Available: thomas"));
-            return 0;
+            Profession prof = professionOverride != null ? Profession.byName(professionOverride) : Profession.NONE;
+            data = NPCData.defaults(name);
+            if (prof != Profession.NONE) {
+                data = new NPCData(name, prof.name(), data.traits(), null, null, data.defaultGoals());
+            }
+            BeyondTradingMod.LOGGER.info("Creating NPC from defaults: {}", name);
+        } else if (professionOverride != null) {
+            Profession prof = Profession.byName(professionOverride);
+            if (prof != Profession.NONE) {
+                data = new NPCData(data.name(), prof.name(), data.traits(),
+                    data.homeId(), data.workplaceId(), data.defaultGoals());
+            }
         }
 
         AINPCEntity npc = new AINPCEntity(ModEntities.AI_NPC, level);
         npc.setPos(pos.x, pos.y, pos.z);
         npc.setHomePos(BlockPos.containing(pos));
+        npc.setWorkplacePos(BlockPos.containing(pos));
         npc.setNpcData(data);
         level.addFreshEntity(npc);
-        BeyondTradingMod.LOGGER.info("Summoned NPC {} at {}", data.name(), pos);
+        npc.saveToDisk();
+        BeyondTradingMod.LOGGER.info("Summoned NPC {} ({}) at {}", data.name(), data.profession(), pos);
         return 1;
     }
 
@@ -185,12 +214,19 @@ public class NPCCommand {
             return 0;
         }
 
-        source.sendSuccess(() -> Component.literal(
-            "§6=== " + data.name() + " ===§r\n"
-            + "§ePersonality: §7" + String.join(", ", data.personality()) + "§r\n"
-            + "§eRole: §7" + data.role() + "§r\n"
-            + "§eHome: §7" + (npc.getHomePos() != null ? npc.getHomePos().toShortString() : "none")),
-            false);
+        StringBuilder info = new StringBuilder();
+        info.append("§6=== ").append(data.name()).append(" ===§r\n");
+        info.append("§eProfession: §7").append(data.profession()).append("§r\n");
+        info.append("§eTraits: §7").append(String.join(", ", data.traits())).append("§r\n");
+        if (data.homeId() != null) info.append("§eHome: §7").append(data.homeId()).append("§r\n");
+        if (data.workplaceId() != null) info.append("§eWorkplace: §7").append(data.workplaceId()).append("§r\n");
+        info.append("§eHome Pos: §7").append(npc.getHomePos() != null ? npc.getHomePos().toShortString() : "none").append("§r\n");
+        info.append("§eWorkplace Pos: §7").append(npc.getWorkplacePos() != null ? npc.getWorkplacePos().toShortString() : "none").append("§r\n");
+        info.append("§eGoals: §7").append(String.join(", ", npc.getCurrentGoals())).append("§r\n");
+        info.append("§eRelationships: §7").append(npc.getRelationships().size()).append("§r\n");
+        info.append("§eUUID: §7").append(npc.getUUID()).append("§r");
+
+        source.sendSuccess(() -> Component.literal(info.toString()), false);
         return 1;
     }
 

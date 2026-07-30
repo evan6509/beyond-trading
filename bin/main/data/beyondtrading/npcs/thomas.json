@@ -1,0 +1,8 @@
+{
+  "name": "Thomas",
+  "profession": "FARMER",
+  "traits": ["Friendly", "Cautious", "Hardworking"],
+  "homeId": "farmhouse",
+  "workplaceId": "farm",
+  "defaultGoals": ["TEND_CROPS", "RESTOCK", "SOCIALIZE"]
+}
