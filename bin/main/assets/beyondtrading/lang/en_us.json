@@ -1,7 +1,0 @@
-{
-  "entity.beyondtrading.ai_npc": "AI NPC",
-  "item.beyondtrading.ai_npc_spawn_egg": "AI NPC Spawn Egg",
-  "command.beyondtrading.summon": "Summoned %s",
-  "command.beyondtrading.inspect": "Inspecting NPC...",
-  "command.beyondtrading.config": "Showing configuration..."
-}

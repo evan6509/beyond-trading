@@ -1,5 +1,25 @@
+# Gradle
 .gradle/
 build/
+bin/
 *.jar
+
+# Fabric Loom
 run/
+*.zip.lock
+io.github.*
+
+# Mod config (generated at runtime)
+config/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
 AGENTS.md
