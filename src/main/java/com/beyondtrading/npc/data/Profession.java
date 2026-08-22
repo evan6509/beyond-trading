@@ -6,19 +6,19 @@ public enum Profession {
     NONE("None", "none", "none", List.of(), List.of("WANDER")),
     FARMER("Farmer", "farm", "farmhouse",
         List.of("TEND_CROPS", "HARVEST", "RESTOCK"),
-        List.of("TEND_CROPS", "RESTOCK", "SOCIALIZE", "WANDER", "SLEEP")),
+        List.of("GO_TO_WORK", "RESTOCK_MATERIALS", "COORDINATE", "SOCIALIZE", "WANDER", "SLEEP")),
     BLACKSMITH("Blacksmith", "forge", "blacksmith_house",
         List.of("SMITH", "REPAIR", "RESTOCK"),
-        List.of("SMITH", "RESTOCK", "SOCIALIZE", "WANDER", "SLEEP")),
+        List.of("GO_TO_WORK", "RESTOCK_MATERIALS", "COORDINATE", "SOCIALIZE", "WANDER", "SLEEP")),
     LIBRARIAN("Librarian", "library", "library_home",
         List.of("READ", "ORGANIZE", "CATALOG"),
-        List.of("READ", "ORGANIZE", "SOCIALIZE", "WANDER", "SLEEP")),
+        List.of("GO_TO_WORK", "RESTOCK_MATERIALS", "COORDINATE", "SOCIALIZE", "WANDER", "SLEEP")),
     EXPLORER("Explorer", "map_room", "cabin",
         List.of("EXPLORE", "MAP", "SCOUT"),
-        List.of("EXPLORE", "MAP", "WANDER", "SLEEP")),
+        List.of("GO_TO_WORK", "RESTOCK_MATERIALS", "COORDINATE", "WANDER", "SLEEP")),
     MERCHANT("Merchant", "trading_post", "warehouse",
         List.of("TRADE", "STOCK", "BARTER"),
-        List.of("TRADE", "STOCK", "SOCIALIZE", "WANDER", "SLEEP"));
+        List.of("GO_TO_WORK", "TRADE", "RESTOCK_MATERIALS", "COORDINATE", "SOCIALIZE", "WANDER", "SLEEP"));
 
     private final String displayName;
     private final String workplaceType;
@@ -40,6 +40,18 @@ public enum Profession {
     public String homeType() { return homeType; }
     public List<String> dailyActivities() { return dailyActivities; }
     public List<String> availableGoals() { return availableGoals; }
+
+    /** A human-readable priority gives a new agent a meaningful starting drive. */
+    public String defaultLongTermGoal() {
+        return switch (this) {
+            case FARMER -> "Keep the village fed through every season";
+            case BLACKSMITH -> "Keep the village's tools and defenses in working order";
+            case LIBRARIAN -> "Preserve useful knowledge for the village";
+            case EXPLORER -> "Map safe routes and useful resources around the village";
+            case MERCHANT -> "Keep the village market supplied and fair";
+            case NONE -> "Find a useful place in the village and help where needed";
+        };
+    }
 
     public static Profession byName(String name) {
         if (name == null) return NONE;

@@ -4,5 +4,5 @@
   "traits": ["Friendly", "Cautious", "Hardworking"],
   "homeId": "farmhouse",
   "workplaceId": "farm",
-  "defaultGoals": ["TEND_CROPS", "RESTOCK", "SOCIALIZE"]
+  "defaultGoals": ["GO_TO_WORK", "RESTOCK_MATERIALS", "COORDINATE", "SOCIALIZE", "SLEEP"]
 }

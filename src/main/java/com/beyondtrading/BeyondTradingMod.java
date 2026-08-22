@@ -4,13 +4,17 @@ import com.beyondtrading.command.NPCCommand;
 import com.beyondtrading.config.ModConfig;
 import com.beyondtrading.entity.AINPCEntity;
 import com.beyondtrading.entity.ModEntities;
+import com.beyondtrading.entity.VillagerConversionManager;
 import com.beyondtrading.llm.ModelListFetcher;
+import com.beyondtrading.llm.LLMInterface;
 import com.beyondtrading.npc.ConversationManager;
+import com.beyondtrading.npc.schedule.NPCScheduler;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.server.MinecraftServer;
@@ -34,24 +38,30 @@ public class BeyondTradingMod implements ModInitializer {
             NPCCommand.register(dispatcher));
 
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register(this::onAllowChat);
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+            ConversationManager.get().disconnect(handler.getPlayer()));
 
-        ServerTickEvents.START_SERVER_TICK.register(server ->
-            ConversationManager.get().tick());
+        ServerTickEvents.START_SERVER_TICK.register(server -> {
+            VillagerConversionManager.tick(server);
+            ConversationManager.get().tick();
+            NPCScheduler.get().tick();
+        });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> LLMInterface.resetShutdownState());
 
         LOGGER.info("Beyond Trading initialized");
     }
 
     private boolean onAllowChat(PlayerChatMessage message, ServerPlayer player, ChatType.Bound bound) {
         if (ConversationManager.get().isEngaged(player)) {
-            ConversationManager.get().handleChat(player, message.signedContent());
-            return false;
+            return !ConversationManager.get().handleChat(player, message.signedContent());
         }
         return true;
     }
 
     private void onServerStopping(MinecraftServer server) {
+        LLMInterface.beginShutdown();
         LOGGER.info("Saving all NPC data...");
         int count = 0;
         for (ServerLevel level : server.getAllLevels()) {
@@ -63,5 +73,7 @@ public class BeyondTradingMod implements ModInitializer {
             }
         }
         LOGGER.info("Saved {} NPC(s)", count);
+        ConversationManager.get().clear();
+        NPCScheduler.get().clear();
     }
 }

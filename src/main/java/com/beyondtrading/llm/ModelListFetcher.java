@@ -15,6 +15,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class ModelListFetcher {
     private static final Gson GSON = new Gson();
@@ -27,9 +29,10 @@ public class ModelListFetcher {
         {"http://localhost:8000/v1", "token-abc123"},
     };
 
-    private static List<String> cachedModels = List.of();
-    private static String workingBaseUrl;
-    private static String workingApiKey;
+    private static volatile List<String> cachedModels = List.of();
+    private static volatile String workingBaseUrl;
+    private static volatile String workingApiKey;
+    private static final AtomicLong lastRecoveryAttempt = new AtomicLong();
 
     public static List<String> getCachedModels() {
         return cachedModels;
@@ -41,6 +44,14 @@ public class ModelListFetcher {
 
     public static String getWorkingApiKey() {
         return workingApiKey;
+    }
+
+    /** Re-probe in the background, throttled so every villager does not probe at once. */
+    public static void refreshInBackground() {
+        long now = System.currentTimeMillis();
+        long previous = lastRecoveryAttempt.get();
+        if (now - previous < 15_000 || !lastRecoveryAttempt.compareAndSet(previous, now)) return;
+        CompletableFuture.runAsync(ModelListFetcher::refresh);
     }
 
     private static String buildModelsUrl(String baseUrl) {
@@ -96,6 +107,12 @@ public class ModelListFetcher {
             }
         }
 
+        // Do not retain a dead endpoint indefinitely. The next request can
+        // then fall back to the configured backend while the next throttled
+        // probe searches for a recovered local server.
+        workingBaseUrl = null;
+        workingApiKey = null;
+        cachedModels = List.of();
         BeyondTradingMod.LOGGER.warn("No LLM endpoint found — tried {} and ports 1234, 8000",
             config.baseUrl());
     }

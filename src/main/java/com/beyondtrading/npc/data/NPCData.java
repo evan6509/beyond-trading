@@ -11,6 +11,6 @@ public record NPCData(
     List<String> defaultGoals
 ) {
     public static NPCData defaults(String name) {
-        return new NPCData(name, "NONE", List.of("friendly"), null, null, List.of());
+        return new NPCData(name, "NONE", List.of("friendly"), null, null, List.of("WANDER"));
     }
 }
